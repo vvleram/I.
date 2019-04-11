@@ -1,0 +1,73 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+
+#подключаемся к API
+from alpha_vantage.timeseries import TimeSeries
+ts = TimeSeries(key='990L10A7DSLD6FG1',output_format='pandas')
+
+#выгружаем данные 
+spx_data, spx_meta_data = ts.get_daily(symbol ='SPX', outputsize='full')
+amzn_data, amzn_meta_data = ts.get_daily(symbol ='AMZN', outputsize='full')
+wal_data, wal_meta_data  = ts.get_daily(symbol ='WAL', outputsize='full')
+aapl_data, appl_meta_data = ts.get_daily(symbol ='AAPL', outputsize='full')
+ebay_data, ebay_meta_data = ts.get_daily(symbol ='EBAY', outputsize='full')
+
+#выгружаем данные по цене закрытия с 2016 года
+spx  = spx_data.loc['2016':'2019', ['4. close']]
+amzn = amzn_data.loc['2016':'2019', ['4. close']]
+ebay = ebay_data.loc['2016':'2019', ['4. close']]
+wal = wal_data.loc['2016':'2019', ['4. close']]
+aapl = aapl_data.loc['2016':'2019', ['4. close']]
+
+#считаем логарифмическую доходность 
+spx_log  = np.log(spx['4. close']) .diff().dropna()
+amzn_log = np.log(amzn['4. close']).diff().dropna()
+ebay_log = np.log(ebay['4. close']).diff().dropna()
+wal_log  = np.log(wal['4. close']) .diff().dropna()
+aapl_log = np.log(aapl['4. close']).diff().dropna()
+
+#создаем датафрейм, содержащий логарифмические доходности выбранных акций
+df = pd.concat([spx_log,amzn_log,ebay_log,wal_log,aapl_log],axis = 1).dropna()
+df.columns = ['SPX', 'AMZN', 'EBAY', 'WAL','AAPL']
+
+#определяем аргументы
+y = df['SPX']
+x = df.filter(items = ['AMZN', 'EBAY','WAL', 'AAPL'])
+
+#строим множественную линейную регрессию
+def reg_m(y,x):
+    x = np.array(x)
+    x = sm.add_constant(x)
+    results = sm.OLS(endog=y, exog=x).fit()
+    return results
+reg_m(y,x).summary()
+
+result = pd.DataFrame({'multiple regression': reg_m(y,x).predict(),
+                       'sample': df['AMZN']}, index = df.index)
+
+plt.figure(figsize = (15,7.5))
+plt.plot(result['2016':'2019'].index,result.loc['2016':'2019','multiple regression'])
+plt.plot(result['2016':'2019'].index,result.loc['2016':'2019','sample'])
+plt.legend()
+plt.show()
+
+# проверяем распределение остатков (как видно на графике, остатки имеют нормальное распределение)
+plt.figure()
+reg_m(y,x).resid.plot.density()
+plt.show()
+
+#визуально проверяем на гетероскедастичность 
+plt.figure(figsize = (20,10))
+plt.scatter(df['SPX'],reg_m(y,x).resid)
+plt.axhline(0.05)
+plt.axhline(-0.05)
+plt.xlabel('x value')
+plt.ylabel('residual')
+plt.show()
+
+#проведем тест Бройша-Пагана
+from statsmodels.stats import diagnostic as dia
+het = dia.het_breuschpagan(reg_m(y,x).resid,x)
+print ('p-value: ', het[-1])
